@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>📚 Thesis Writing Assistant</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>🎓 Thesis Writing Assistant</h1>
+
+  <!-- 📄 Section 1: Introduction Analysis -->
+  <section>
+    <h2>📄 Introduction Analysis & Topic Discovery</h2>
+    <textarea id="introduction" placeholder="Paste your thesis introduction here..."></textarea>
+    <button id="analyzeIntroduction">📤 Analyze Introduction</button>
+    <button class="whatDoesItMean">📖 What Does It Mean?</button>
+    <div id="analyzeIntroductionResult" class="result-box"></div>
+    <button id="addNoteIntroduction" class="addNoteBtn" data-target="analyzeIntroductionResult">➕ Add to Notes</button>
+  </section>
+  
+  <!-- ✍️ Section 2: One-Topic Exploration -->
+  <section>
+    <h2>🔍 Search Real Studies by Topic</h2>
+    <textarea id="authorInput" placeholder="Enter one topic you'd like to explore..."></textarea>
+    <button id="refineIdeas">🔍 Refine & Connect to Real Studies</button>
+    <button class="whatDoesItMean">📖 What Does It Mean?</button>
+    <h3>🧠 Subtopics & Related Research</h3>
+    <div id="authorStudiesBox" class="studies-box"></div>
+    <h3>✍️ APA References & Writing Suggestions</h3>
+    <div id="authorSuggestions" class="result-box"></div>
+    <button id="addNoteTopicStudy" class="addNoteBtn" data-target="authorSuggestions">➕ Add to Notes</button>
+  </section>
+
+  <!-- 💬 Section 3: Expert Academic Help -->
+  <section>
+    <h2>💬 Expert Academic Help</h2>
+    <textarea id="generalChat" placeholder="Ask anything — cite sources, rephrase your idea, request APA references, etc..."></textarea>
+    <button id="sendGeneralChat">📤 Ask ChatGPT</button>
+    <button class="whatDoesItMean">📖 What Does It Mean?</button>
+    <div id="generalChatResult" class="result-box"></div>
+    <button id="addNoteGeneralChat" class="addNoteBtn" data-target="generalChatResult">➕ Add to Notes</button>
+  </section>
+
+  <!-- 🗂 Section 4: Notes Accumulation -->
+  <section>
+    <h2>🗂 Personal Notes</h2>
+    <ul id="notesList">
+      <li>📌 Saved notes will appear here and be used to write your final section.</li>
+    </ul>
+  </section>
+
+  <!-- 📖 Section 5: Final Section Writer -->
+  <section>
+    <h2>📖 Build Final Section Using My Notes</h2>
+    <div id="suggestedFullSection">Click the button below to generate your "Previous Studies and Related Topics" section.</div>
+    <button id="generateFullSection">▶️ Generate Full Section</button>
+    <button class="whatDoesItMean">📖 What Does It Mean?</button>
+  </section>
+  <!-- 📖 References Section -->
+<section id="referencesSection">
+  <h2>📖 References (APA)</h2>
+  <ul id="referencesList"></ul>
+</section>
+   <section id="glossarySection">
+  <h2>📘 Saved Glossary</h2>
+  <ul id="glossaryList"></ul>
+</section>
+
+  
+
+  <!-- 💾 Section 6: Save Work -->
+  <section style="text-align: center; margin-top: 30px;">
+    <button id="saveWork">💾 Save My Work</button>
+  </section>
+
+  <!-- 📖 Glossary Popup -->
+  <div id="glossaryPopup" style="display: none; position: absolute;">
+    <h3>📖 Glossary</h3>
+    <p><strong>Phrase:</strong> <span id="glossaryTerm">[Selected text]</span></p>
+    <p><strong>Meaning (English):</strong> <span id="glossaryEnglish">Definition here</span></p>
+    <p><strong>Meaning (Japanese):</strong> <span id="glossaryJapanese">日本語訳</span></p>
+    <hr>
+    <p><strong>Button Guide:</strong></p>
+    <ul style="text-align: left;">
+      <li>🔊 <strong>Play It:</strong> Hear the pronunciation</li>
+      <li>➕ <strong>Add to Glossary:</strong> Save this word</li>
+      <li>📋 <strong>Copy to Clipboard:</strong> Copy everything above</li>
+      <li>❌ <strong>Close:</strong> Close this popup</li>
+    </ul>
+    <button id="playIt">🔊 Play It</button>
+    <button id="addToGlossary">➕ Add to Glossary</button>
+    <button id="copyToClipboard">📋 Copy</button>
+    <button id="closeGlossary">❌ Close</button>
+  </div>
+<!-- 📖 Glossary Popup -->
+<div id="glossaryPopup" style="display: none; position: absolute; z-index: 9999; background: #fff; border: 1px solid #ccc; padding: 20px; border-radius: 10px; width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+  <h3 style="cursor: move; margin-top: 0;">📖 Glossary</h3>
+  <p><strong>Phrase:</strong> <span id="glossaryTerm">[Selected text]</span></p>
+  <p><strong>Meaning (English):</strong> <span id="glossaryEnglish">[English definition here]</span></p>
+  <p><strong>Meaning (Japanese):</strong> <span id="glossaryJapanese">[Japanese translation]</span></p>
+  <hr>
+  <p><strong>Button Guide:</strong></p>
+  <ul style="text-align: left;">
+    <li>🔊 <strong>Play It:</strong> Read the word out loud using AI</li>
+    <li>➕ <strong>Add to Glossary:</strong> Save this word for later</li>
+    <li>📋 <strong>Copy to Clipboard:</strong> Copy all info</li>
+    <li>❌ <strong>Close:</strong> Close the popup</li>
+  </ul>
+  <button id="playIt">🔊 Play It</button>
+  <button id="addToGlossary">➕ Add to Glossary</button>
+  <button id="copyToClipboard">📋 Copy</button>
+  <button id="closeGlossary">❌ Close</button>
+</div>
+  <script src="app.js"></script>
+</body>
+</html>

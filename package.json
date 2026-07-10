@@ -1,0 +1,12 @@
+{
+  "name": "previous-studies-builder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thesis Writing Assistant - Previous Studies Builder",
+  "scripts": {
+    "start": "vercel dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
