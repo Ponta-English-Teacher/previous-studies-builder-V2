@@ -12,6 +12,24 @@ let ttsAudio = null;
 // exact raw text so notes stay clean and reliably comparable for de-duplication.
 const resultRawContent = {};
 
+// ==== Project persistence (autosave / restore / export / import / reset) ====
+
+const PROJECT_APP_ID = 'previous-studies-builder';
+const PROJECT_SCHEMA_VERSION = 1;
+const AUTOSAVE_DEBOUNCE_MS = 800;
+
+// Topic + papers currently shown in the "Search Real Studies by Topic" section.
+// Tracked separately from studyCache (which may hold several searched topics)
+// because only the currently displayed search is part of the saved project.
+let currentStudiesTopic = '';
+
+// Structured glossary entries (term/meaning/japanese), kept in parallel with
+// the visible #glossaryList so autosave/export never has to scrape HTML back
+// into data.
+let glossaryEntries = [];
+
+let autosaveTimer = null;
+
 // ==== Utility Functions ====
 
 function escapeHTML(str) {
@@ -102,6 +120,401 @@ function renderMarkdownLite(raw) {
 }
 
 /**
+ * Returns an <li>'s own text, excluding any nested <ul>/<ol> (subtopics,
+ * or anything else nested one level down) and excluding any copy button
+ * already appended to it.
+ */
+function ownListItemText(li) {
+  const clone = li.cloneNode(true);
+  clone.querySelectorAll('ul, ol, .copyItemBtn').forEach(el => el.remove());
+  return clone.textContent.trim();
+}
+
+function makeCopyButton(getText) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copyItemBtn';
+  btn.textContent = '📋 Copy';
+  btn.onclick = () => {
+    const text = getText();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.textContent;
+      btn.textContent = '✅ Copied';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+    });
+  };
+  return btn;
+}
+
+// Returns the sibling elements between `headingText` (matched case-insensitively)
+// and the next heading of the same or shallower level, so a section's content
+// can be processed without touching sections before or after it.
+function getSectionElements(container, headingText) {
+  const headings = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+  const heading = headings.find(h => h.textContent.trim().toLowerCase() === headingText.toLowerCase());
+  if (!heading) return [];
+  const level = Number(heading.tagName[1]);
+  const elements = [];
+  let node = heading.nextElementSibling;
+  while (node) {
+    const match = /^H([1-6])$/.exec(node.tagName);
+    if (match && Number(match[1]) <= level) break;
+    elements.push(node);
+    node = node.nextElementSibling;
+  }
+  return elements;
+}
+
+function attachCopyButtonsToLists(root) {
+  root.querySelectorAll('li').forEach(li => {
+    const hasOwnButton = Array.from(li.children).some(child => child.classList.contains('copyItemBtn'));
+    if (hasOwnButton) return;
+    const text = ownListItemText(li);
+    if (!text) return;
+    const button = makeCopyButton(() => ownListItemText(li));
+    // Insert right after the li's own text and before any nested subtopic
+    // list, so the button sits next to its own line, not below its children.
+    const nestedList = li.querySelector(':scope > ul, :scope > ol');
+    if (nestedList) {
+      li.insertBefore(button, nestedList);
+    } else {
+      li.appendChild(button);
+    }
+  });
+}
+
+// Adds a "Copy" button to each Topic, Subtopic, and Search Query line inside
+// the Introduction Analysis result box, scoped only to those two sections.
+function addReuseCopyButtons(container) {
+  getSectionElements(container, 'Suggested Literature Topics').forEach(attachCopyButtonsToLists);
+  getSectionElements(container, 'Possible Search Queries').forEach(attachCopyButtonsToLists);
+}
+
+// ---- Save-status indicator ----
+
+function showSaveStatus(text, isError = false) {
+  const el = document.getElementById('saveStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('save-status-error', !!isError);
+}
+
+// ---- Debounced autosave ----
+// Only ever reads from committed state (resultRawContent, currentStudiesTopic,
+// studyCache, notes/references/glossary already in the DOM) -- never from a
+// transient "Thinking..."/"Searching..." placeholder -- so loading messages
+// are never persisted.
+
+function scheduleAutosave(delay = AUTOSAVE_DEBOUNCE_MS) {
+  showSaveStatus('Saving...');
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(performAutosave, delay);
+}
+
+async function performAutosave() {
+  try {
+    const payload = buildAutosavePayload();
+    await ProjectDB.saveProject(payload);
+    const time = new Date(payload.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    showSaveStatus(`Saved automatically at ${time}`);
+  } catch (err) {
+    console.error('Autosave failed:', err);
+    showSaveStatus('Save failed', true);
+  }
+}
+
+// ---- Project data: build / normalize / apply ----
+
+function buildProjectData() {
+  const notes = Array.from(document.getElementById('notesList').querySelectorAll('li[data-note-text]'))
+    .map(li => li.dataset.noteText);
+  const references = Array.from(document.getElementById('referencesList').children)
+    .map(li => li.textContent);
+
+  return {
+    introduction: document.getElementById('introduction').value,
+    introductionAnalysisRaw: resultRawContent['analyzeIntroductionResult'] || '',
+    authorInput: document.getElementById('authorInput').value,
+    currentStudiesTopic: currentStudiesTopic,
+    currentStudies: currentStudiesTopic ? (studyCache[currentStudiesTopic] || []) : [],
+    authorSuggestionsRaw: resultRawContent['authorSuggestions'] || '',
+    generalChat: document.getElementById('generalChat').value,
+    generalChatResultRaw: resultRawContent['generalChatResult'] || '',
+    notes: notes,
+    suggestedFullSectionRaw: resultRawContent['suggestedFullSection'] || '',
+    references: references,
+    glossary: glossaryEntries.slice()
+  };
+}
+
+function buildAutosavePayload() {
+  return {
+    appId: PROJECT_APP_ID,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    savedAt: new Date().toISOString(),
+    ...buildProjectData()
+  };
+}
+
+function buildExportPayload() {
+  return {
+    appId: PROJECT_APP_ID,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    ...buildProjectData()
+  };
+}
+
+// Fills in sensible defaults for any missing/malformed field, so older or
+// hand-edited project files still load instead of crashing the restore.
+function normalizeProjectData(raw) {
+  const r = raw || {};
+  const isString = (v) => typeof v === 'string';
+  return {
+    schemaVersion: typeof r.schemaVersion === 'number' ? r.schemaVersion : PROJECT_SCHEMA_VERSION,
+    lastSavedAt: r.savedAt || r.exportedAt || null,
+    introduction: isString(r.introduction) ? r.introduction : '',
+    introductionAnalysisRaw: isString(r.introductionAnalysisRaw) ? r.introductionAnalysisRaw : '',
+    authorInput: isString(r.authorInput) ? r.authorInput : '',
+    currentStudiesTopic: isString(r.currentStudiesTopic) ? r.currentStudiesTopic : '',
+    currentStudies: Array.isArray(r.currentStudies) ? r.currentStudies : [],
+    authorSuggestionsRaw: isString(r.authorSuggestionsRaw) ? r.authorSuggestionsRaw : '',
+    generalChat: isString(r.generalChat) ? r.generalChat : '',
+    generalChatResultRaw: isString(r.generalChatResultRaw) ? r.generalChatResultRaw : '',
+    notes: Array.isArray(r.notes) ? r.notes.filter(isString) : [],
+    suggestedFullSectionRaw: isString(r.suggestedFullSectionRaw) ? r.suggestedFullSectionRaw : '',
+    references: Array.isArray(r.references) ? r.references.filter(isString) : [],
+    glossary: Array.isArray(r.glossary)
+      ? r.glossary.filter(g => g && typeof g === 'object').map(g => ({
+          term: isString(g.term) ? g.term : '',
+          meaning: isString(g.meaning) ? g.meaning : '',
+          japanese: isString(g.japanese) ? g.japanese : ''
+        }))
+      : []
+  };
+}
+
+function clearRealNotes() {
+  document.querySelectorAll('#notesList li[data-note-text]').forEach(li => li.remove());
+}
+
+// Appends a note exactly like the original "Add to Notes" button did:
+// de-duplicated by exact text, with its own Delete button.
+// Pass { silent: true } during restore/import so a duplicate (which
+// shouldn't normally happen, since saved notes were already de-duplicated)
+// doesn't pop up an alert mid-restore.
+function addNoteToList(text, options = {}) {
+  const notesList = document.getElementById("notesList");
+  const isDuplicate = Array.from(notesList.querySelectorAll("li[data-note-text]"))
+    .some(li => li.dataset.noteText === text);
+
+  if (isDuplicate) {
+    if (!options.silent) alert("This note has already been saved.");
+    return;
+  }
+
+  const li = document.createElement("li");
+  li.dataset.noteText = text;
+
+  const noteBody = document.createElement("span");
+  noteBody.className = "note-text";
+  noteBody.textContent = text;
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.textContent = "🗑️ Delete";
+  deleteBtn.className = "deleteNoteBtn";
+  deleteBtn.onclick = () => {
+    li.remove();
+    scheduleAutosave();
+  };
+
+  li.appendChild(noteBody);
+  li.appendChild(deleteBtn);
+  notesList.appendChild(li);
+
+  if (!options.silent) scheduleAutosave();
+}
+
+// Adds one glossary entry to both the visible list and the structured
+// glossaryEntries array used for autosave/export.
+function addGlossaryEntryToList(term, meaning, japanese, options = {}) {
+  const li = document.createElement("li");
+  li.innerHTML = `<strong>${escapeHTML(term)}</strong><br>
+  <em>${escapeHTML(meaning)}</em><br>
+  <span>${escapeHTML(japanese)}</span>`;
+  document.getElementById("glossaryList").appendChild(li);
+  glossaryEntries.push({ term, meaning, japanese });
+  if (!options.silent) scheduleAutosave();
+}
+
+const DEFAULT_FULL_SECTION_MESSAGE = 'Click the button below to generate your "Previous Studies and Related Topics" section.';
+
+// Applies a normalized project snapshot to the page. Used by page-load
+// restore, Import, and Reset (with an all-empty snapshot) alike.
+function applyProjectSnapshot(rawData) {
+  const s = normalizeProjectData(rawData);
+
+  document.getElementById('introduction').value = s.introduction;
+
+  const introEl = document.getElementById('analyzeIntroductionResult');
+  resultRawContent[introEl.id] = s.introductionAnalysisRaw;
+  introEl.innerHTML = s.introductionAnalysisRaw ? renderMarkdownLite(s.introductionAnalysisRaw) : '';
+  if (s.introductionAnalysisRaw) addReuseCopyButtons(introEl);
+
+  document.getElementById('authorInput').value = s.authorInput;
+  currentStudiesTopic = s.currentStudiesTopic;
+  const studyBox = document.getElementById('authorStudiesBox');
+  if (s.currentStudiesTopic && s.currentStudies.length) {
+    studyCache[s.currentStudiesTopic] = s.currentStudies;
+    renderStudies(s.currentStudies, studyBox);
+  } else {
+    studyBox.innerHTML = '';
+  }
+
+  const suggestionsEl = document.getElementById('authorSuggestions');
+  resultRawContent[suggestionsEl.id] = s.authorSuggestionsRaw;
+  suggestionsEl.innerHTML = s.authorSuggestionsRaw ? renderMarkdownLite(s.authorSuggestionsRaw) : '';
+
+  document.getElementById('generalChat').value = s.generalChat;
+  const chatEl = document.getElementById('generalChatResult');
+  resultRawContent[chatEl.id] = s.generalChatResultRaw;
+  chatEl.innerHTML = s.generalChatResultRaw ? renderMarkdownLite(s.generalChatResultRaw) : '';
+
+  clearRealNotes();
+  s.notes.forEach(noteText => addNoteToList(noteText, { silent: true }));
+
+  const fullSectionEl = document.getElementById('suggestedFullSection');
+  resultRawContent[fullSectionEl.id] = s.suggestedFullSectionRaw;
+  fullSectionEl.innerHTML = s.suggestedFullSectionRaw
+    ? renderMarkdownLite(s.suggestedFullSectionRaw)
+    : DEFAULT_FULL_SECTION_MESSAGE;
+
+  const referencesList = document.getElementById('referencesList');
+  referencesList.innerHTML = '';
+  s.references.forEach(ref => {
+    const li = document.createElement('li');
+    li.textContent = ref;
+    referencesList.appendChild(li);
+  });
+
+  document.getElementById('glossaryList').innerHTML = '';
+  glossaryEntries = [];
+  s.glossary.forEach(entry => addGlossaryEntryToList(entry.term, entry.meaning, entry.japanese, { silent: true }));
+}
+
+function hasExistingWork() {
+  const d = buildProjectData();
+  return !!(
+    d.introduction || d.introductionAnalysisRaw || d.authorInput || d.authorSuggestionsRaw ||
+    d.generalChat || d.generalChatResultRaw || d.notes.length || d.suggestedFullSectionRaw ||
+    d.references.length || d.glossary.length
+  );
+}
+
+// ---- Generic confirmation modal (reused for restore/import-replace/reset) ----
+
+function showConfirmModal({ title, message, confirmLabel, cancelLabel, onConfirm, onCancel }) {
+  const overlay = document.getElementById('confirmModal');
+  document.getElementById('confirmModalTitle').textContent = title;
+  document.getElementById('confirmModalMessage').textContent = message;
+  const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+  const cancelBtn = document.getElementById('confirmModalCancelBtn');
+  confirmBtn.textContent = confirmLabel;
+  cancelBtn.textContent = cancelLabel;
+
+  const cleanup = () => {
+    overlay.style.display = 'none';
+    confirmBtn.onclick = null;
+    cancelBtn.onclick = null;
+  };
+  confirmBtn.onclick = () => { cleanup(); if (onConfirm) onConfirm(); };
+  cancelBtn.onclick = () => { cleanup(); if (onCancel) onCancel(); };
+  overlay.style.display = 'flex';
+}
+
+// ---- Export / Import ----
+
+function exportProjectAsJSON() {
+  const payload = buildExportPayload();
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `previous-studies-project_${dateStr}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Returns an error message string if invalid, or null if the file looks like
+// a genuine Previous Studies Builder project.
+function validateProjectFile(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return 'This file does not contain a valid JSON project object.';
+  }
+  if (parsed.appId === PROJECT_APP_ID) {
+    return null;
+  }
+  if (typeof parsed.schemaVersion !== 'number') {
+    return 'This does not look like a Previous Studies Builder project file (missing schemaVersion).';
+  }
+  const knownFields = ['introduction', 'introductionAnalysisRaw', 'authorInput', 'notes', 'suggestedFullSectionRaw', 'references', 'glossary'];
+  const hasAnyKnownField = knownFields.some(f => Object.prototype.hasOwnProperty.call(parsed, f));
+  if (!hasAnyKnownField) {
+    return 'This file does not contain recognizable Previous Studies Builder project data.';
+  }
+  return null;
+}
+
+function handleImportFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(reader.result);
+    } catch (err) {
+      alert('Import failed: this file is not valid JSON.');
+      return;
+    }
+
+    const validationError = validateProjectFile(parsed);
+    if (validationError) {
+      alert(`Import failed: ${validationError}`);
+      return;
+    }
+
+    const doImport = async () => {
+      const normalized = normalizeProjectData(parsed);
+      applyProjectSnapshot(normalized);
+      try {
+        await ProjectDB.saveProject(buildAutosavePayload());
+        showSaveStatus('Project imported and saved.');
+      } catch (err) {
+        console.error('Failed to save imported project:', err);
+        showSaveStatus('Save failed', true);
+      }
+      alert('Project imported successfully.');
+    };
+
+    if (hasExistingWork()) {
+      showConfirmModal({
+        title: 'Replace current work?',
+        message: 'This will replace all current project data.',
+        confirmLabel: 'Import and Replace',
+        cancelLabel: 'Cancel',
+        onConfirm: doImport
+      });
+    } else {
+      doImport();
+    }
+  };
+  reader.onerror = () => alert('Import failed: could not read the file.');
+  reader.readAsText(file);
+}
+
+/**
  * Formats a paper's bibliographic information into a full APA style reference.
  * Handles journal names that might be objects.
  * @param {object} paper - The paper object from Semantic Scholar.
@@ -170,6 +583,7 @@ async function callOpenAI(prompt, resultElement, options = {}) {
     resultElement.innerHTML = '<p class="ai-error">⚠️ Error calling OpenAI. Check your connection and try again.</p>';
     console.error(error);
   }
+  scheduleAutosave();
 }
 
 async function playTextWithOpenAITTS(text, voice = "alloy") {
@@ -291,10 +705,15 @@ Provide a clear, structured, academic explanation or advice. If applicable, incl
 
   makeDraggable(document.getElementById("glossaryPopup"));
 
+  // Debounced autosave on free-text typing (Introduction, Topic search, General Chat).
+  document.getElementById("introduction").addEventListener("input", () => scheduleAutosave());
+  document.getElementById("authorInput").addEventListener("input", () => scheduleAutosave());
+  document.getElementById("generalChat").addEventListener("input", () => scheduleAutosave());
+
   document.getElementById("analyzeIntroduction").onclick = () => {
     const intro = document.getElementById("introduction").value.trim();
     if (!intro) return alert("Please paste your introduction.");
-    const prompt = `You are an academic writing assistant. Analyze the following thesis introduction and respond using EXACTLY this Markdown structure and these four headings, in this order, each starting with "## ":
+    const prompt = `You are an academic writing assistant. Analyze the following thesis introduction and respond using EXACTLY this Markdown structure and these five headings, in this order, each starting with "## ":
 
 ## Clarity and Coherence
 (A short paragraph or bullet list evaluating clarity and coherence)
@@ -305,7 +724,7 @@ Provide a clear, structured, academic explanation or advice. If applicable, incl
 ## Suggestions for Improvement
 (A bullet list of concrete, actionable suggestions, one per line starting with "- ")
 
-## Suggested Topics and Subtopics
+## Suggested Literature Topics
 (A numbered list of 2-4 related topics; under each topic, add 2-3 nested subtopics as indented bullet lines, like:
 1. Topic Title
    - Subtopic A
@@ -315,11 +734,39 @@ Provide a clear, structured, academic explanation or advice. If applicable, incl
    - Subtopic B
 )
 
-Do not add any headings, sections, or commentary other than these four.
+## Possible Search Queries
+(For EACH topic listed above, repeat its exact title as a sub-heading starting with "### ", followed by 4-6 bullet lines (starting with "- ") giving alternative search queries likely to retrieve relevant studies on Semantic Scholar. These must be realistic multi-word search phrases, not single keywords. Vary specificity: include some queries that closely match the topic, some that use common research terminology, and some that use related constructs, so the student can try several searches. Optimize purely for discoverability, not grammatical readability -- imperfect English phrasing is fine. Format exactly like:
+### Topic Title
+- search query phrase one
+- search query phrase two
+- search query phrase three
+- search query phrase four
+### Another Topic Title
+- search query phrase one
+- search query phrase two
+...
+)
+
+Do not add any headings, sections, or commentary other than these five.
 
 Here is the introduction:
 "${intro}"`;
-    callOpenAI(prompt, document.getElementById("analyzeIntroductionResult"));
+    callOpenAI(prompt, document.getElementById("analyzeIntroductionResult")).then(() => {
+      addReuseCopyButtons(document.getElementById("analyzeIntroductionResult"));
+    });
+  };
+
+  document.getElementById("clearSearch").onclick = () => {
+    const input = document.getElementById("authorInput");
+    const studyBox = document.getElementById("authorStudiesBox");
+    const suggestionsBox = document.getElementById("authorSuggestions");
+    input.value = "";
+    studyBox.innerHTML = "";
+    suggestionsBox.innerHTML = "";
+    resultRawContent[suggestionsBox.id] = "";
+    currentStudiesTopic = "";
+    input.focus();
+    scheduleAutosave();
   };
 
   document.getElementById("refineIdeas").onclick = async () => {
@@ -329,8 +776,10 @@ Here is the introduction:
     if (!topic) return alert("Please enter a topic.");
     studyBox.textContent = '🔎 Now fetching studies...';
     if (studyCache[topic]) {
+      currentStudiesTopic = topic;
       renderStudies(studyCache[topic], studyBox);
       generateNote(topic, studyCache[topic], box);
+      scheduleAutosave();
     } else {
       const url = `/api/semantic-scholar-search?topic=${encodeURIComponent(topic)}`;
       try {
@@ -343,8 +792,10 @@ Here is the introduction:
         if (data.warning) console.warn(data.warning);
         if (data.data && data.data.length) {
           studyCache[topic] = data.data;
+          currentStudiesTopic = topic;
           renderStudies(data.data, studyBox);
           generateNote(topic, data.data, box);
+          scheduleAutosave();
         } else {
           studyBox.textContent = "No studies found.";
         }
@@ -384,6 +835,7 @@ Here is the introduction:
     // Call OpenAI to generate the section. Use .then() to ensure updateReferencesFromNotes runs AFTER the AI response.
     callOpenAI(prompt, document.getElementById("suggestedFullSection")).then(() => {
       updateReferencesFromNotes();
+      scheduleAutosave();
     });
   };
 
@@ -399,33 +851,6 @@ Here is the introduction:
       addNoteToList(text);
     };
   });
-
-  function addNoteToList(text) {
-    const notesList = document.getElementById("notesList");
-    const isDuplicate = Array.from(notesList.querySelectorAll("li[data-note-text]"))
-      .some(li => li.dataset.noteText === text);
-
-    if (isDuplicate) {
-      alert("This note has already been saved.");
-      return;
-    }
-
-    const li = document.createElement("li");
-    li.dataset.noteText = text;
-
-    const noteBody = document.createElement("span");
-    noteBody.className = "note-text";
-    noteBody.textContent = text;
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.textContent = "🗑️ Delete";
-    deleteBtn.className = "deleteNoteBtn";
-    deleteBtn.onclick = () => li.remove();
-
-    li.appendChild(noteBody);
-    li.appendChild(deleteBtn);
-    notesList.appendChild(li);
-  }
 
   function setupGlossary() {
     document.querySelectorAll(".whatDoesItMean").forEach(btn => {
@@ -458,17 +883,11 @@ Here is the introduction:
   };
 
   document.getElementById("addToGlossary").onclick = () => {
-  const term = document.getElementById("glossaryTerm").textContent;
-  const meaning = document.getElementById("glossaryEnglish").textContent;
-  const japanese = document.getElementById("glossaryJapanese").textContent;
-
-  const li = document.createElement("li");
-  li.innerHTML = `<strong>${term}</strong><br>
-  <em>${meaning}</em><br>
-  <span>${japanese}</span>`;
-
-  document.getElementById("glossaryList").appendChild(li);
-};
+    const term = document.getElementById("glossaryTerm").textContent;
+    const meaning = document.getElementById("glossaryEnglish").textContent;
+    const japanese = document.getElementById("glossaryJapanese").textContent;
+    addGlossaryEntryToList(term, meaning, japanese);
+  };
 
   document.getElementById("copyToClipboard").onclick = () => {
     const text = `Phrase: ${document.getElementById("glossaryTerm").textContent}
@@ -479,6 +898,80 @@ Meaning (JP): ${document.getElementById("glossaryJapanese").textContent}`;
 
   // Add the event listener for the "Save My Work" button
   document.getElementById("saveWork").onclick = downloadHTMLFile;
+
+  // ---- Export / Import / Reset Project ----
+
+  document.getElementById("exportProjectBtn").onclick = exportProjectAsJSON;
+
+  document.getElementById("importProjectBtn").onclick = () => {
+    document.getElementById("importFileInput").click();
+  };
+
+  document.getElementById("importFileInput").onchange = (e) => {
+    const file = e.target.files[0];
+    if (file) handleImportFile(file);
+    e.target.value = ""; // allow re-selecting the same file later
+  };
+
+  document.getElementById("resetProjectBtn").onclick = () => {
+    showConfirmModal({
+      title: "Reset this project?",
+      message: "This will delete the current work stored in this browser.",
+      confirmLabel: "Reset Project",
+      cancelLabel: "Cancel",
+      onConfirm: async () => {
+        applyProjectSnapshot({});
+        try {
+          await ProjectDB.deleteProject();
+          showSaveStatus("Project reset.");
+        } catch (err) {
+          console.error("Failed to clear saved project:", err);
+          showSaveStatus("Save failed", true);
+        }
+      }
+    });
+  };
+
+  // ---- Restore previous work on page load ----
+
+  (async function checkForSavedProject() {
+    let saved = null;
+    try {
+      saved = await ProjectDB.loadProject();
+    } catch (err) {
+      console.error("Failed to check for a saved project:", err);
+    }
+    if (!saved) return;
+
+    const when = saved.savedAt ? new Date(saved.savedAt).toLocaleString() : "an earlier session";
+    showConfirmModal({
+      title: "📁 Previous work found",
+      message: `Last saved: ${when}`,
+      confirmLabel: "Continue Previous Work",
+      cancelLabel: "Start a New Project",
+      onConfirm: () => {
+        applyProjectSnapshot(saved);
+        showSaveStatus("Previous work restored.");
+      },
+      onCancel: () => {
+        showConfirmModal({
+          title: "Delete previous project?",
+          message: "This will permanently delete your previously saved work stored in this browser.",
+          confirmLabel: "Delete and Start New",
+          cancelLabel: "Cancel",
+          onConfirm: async () => {
+            try {
+              await ProjectDB.deleteProject();
+              showSaveStatus("Previous project deleted.");
+            } catch (err) {
+              console.error("Failed to delete saved project:", err);
+              showSaveStatus("Save failed", true);
+            }
+          }
+        });
+      }
+    });
+  })();
 
 }); // End of DOMContentLoaded
 

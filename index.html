@@ -8,6 +8,17 @@
 <body>
   <h1>🎓 Thesis Writing Assistant</h1>
 
+  <!-- 💾 Project persistence toolbar -->
+  <div id="projectToolbar" class="project-toolbar">
+    <span id="saveStatus" class="save-status"></span>
+    <div class="project-toolbar-buttons">
+      <button id="exportProjectBtn">⬇️ Export Project</button>
+      <button id="importProjectBtn">⬆️ Import Project</button>
+      <input type="file" id="importFileInput" accept="application/json,.json" style="display:none;">
+      <button id="resetProjectBtn">♻️ Reset Project</button>
+    </div>
+  </div>
+
   <!-- 📄 Section 1: Introduction Analysis -->
   <section>
     <h2>📄 Introduction Analysis & Topic Discovery</h2>
@@ -23,6 +34,7 @@
     <h2>🔍 Search Real Studies by Topic</h2>
     <textarea id="authorInput" placeholder="Enter one topic you'd like to explore..."></textarea>
     <button id="refineIdeas">🔍 Refine & Connect to Real Studies</button>
+    <button id="clearSearch">🧹 Clear Search</button>
     <button class="whatDoesItMean">📖 What Does It Mean?</button>
     <h3>🧠 Subtopics & Related Research</h3>
     <div id="authorStudiesBox" class="studies-box"></div>
@@ -111,6 +123,20 @@
   <button id="copyToClipboard">📋 Copy</button>
   <button id="closeGlossary">❌ Close</button>
 </div>
+
+  <!-- 💬 Generic confirmation modal (reused for restore / import-replace / reset) -->
+  <div id="confirmModal" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <h3 id="confirmModalTitle">Title</h3>
+      <p id="confirmModalMessage">Message</p>
+      <div class="modal-actions">
+        <button id="confirmModalConfirmBtn" class="modalPrimaryBtn">Confirm</button>
+        <button id="confirmModalCancelBtn" class="modalSecondaryBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="db.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

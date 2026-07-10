@@ -59,6 +59,10 @@ button {
   background-color: #2a7ae2; /* Blue */
 }
 
+#clearSearch {
+  background-color: #6c757d; /* Gray */
+}
+
 .findStudies {
   background-color: #28a745; /* Green */
 }
@@ -216,6 +220,20 @@ button:disabled {
   font-weight: bold;
 }
 
+.copyItemBtn {
+  background-color: #e9ecef;
+  color: #333;
+  font-size: 12px;
+  padding: 2px 8px;
+  margin: 0 0 0 10px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.copyItemBtn:hover {
+  background-color: #d6d9dc;
+}
+
 /* ==== Personal Notes list ==== */
 #notesList li {
   display: flex;
@@ -239,6 +257,85 @@ button:disabled {
   font-size: 13px;
   padding: 6px 10px;
   flex-shrink: 0;
+}
+
+/* ==== Project persistence toolbar ==== */
+.project-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: -10px 0 20px;
+}
+
+.save-status {
+  font-size: 13px;
+  color: #666;
+  min-height: 18px;
+}
+
+.save-status-error {
+  color: #b02a37;
+  font-weight: bold;
+}
+
+.project-toolbar-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#exportProjectBtn, #importProjectBtn {
+  background-color: #17a2b8;
+}
+
+#resetProjectBtn {
+  background-color: #dc3545;
+}
+
+/* ==== Generic confirmation modal ==== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal-box {
+  background: #fff;
+  padding: 25px;
+  border-radius: 8px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.modal-box h3 {
+  margin-top: 0;
+  color: #2a7ae2;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.modalPrimaryBtn {
+  background-color: #2a7ae2;
+  color: white;
+}
+
+.modalSecondaryBtn {
+  background-color: #6c757d;
+  color: white;
 }
 
 #glossaryList li {
