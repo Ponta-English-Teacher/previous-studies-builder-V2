@@ -565,7 +565,7 @@ async function callOpenAI(prompt, resultElement, options = {}) {
       },
       body: JSON.stringify({
         prompt,
-        model: options.model || "gpt-4",
+        model: options.model || "gpt-4o-mini",
         max_tokens: options.max_tokens || 800,
         temperature: options.temperature === undefined ? 0.7 : options.temperature
       })

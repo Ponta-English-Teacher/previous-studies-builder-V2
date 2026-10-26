@@ -26,7 +26,7 @@ module.exports = async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: model || 'gpt-4',
+        model: model || 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: max_tokens || 800,
         temperature: temperature === undefined ? 0.7 : temperature
